@@ -64,8 +64,7 @@ PVC_NAME="medik8s-crs-backup"
 POD_NAME="medik8s-backup-writer"
 STORAGE_SIZE="1Gi"
 STORAGE_CLASS="" # empty = cluster default
-# must-gather's base image; it only needs a shell + coreutils for this POC.
-IMAGE="registry.access.redhat.com/ubi9/ubi-minimal:latest"
+IMAGE="${WAO_MUST_GATHER_IMAGE:-quay.io/medik8s/must-gather:latest}"
 MOUNT="/backup"
 SENTINEL="${MOUNT}/.backup-complete"
 WAIT_TIMEOUT="180s"

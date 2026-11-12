@@ -33,10 +33,10 @@ live cluster. They are **only POCs for disposable / non-production clusters.**
 
 ### Prerequisites
 
-- `kubectl` and a reachable **OLM-enabled** cluster (e.g. OpenShift) with the
+- `kubectl` or `oc` and a reachable **OLM-enabled** cluster (e.g. OpenShift) with the
   medik8s operators installed.
-- For the WAO build/install step: `git`, `make`, `go`, and a container tool
-  (`podman` or `docker`).
+- `tar`and `awk`.
+- `git`, `make`, `go`, and a container tool (`podman` or `docker`).
 
 ### Run the whole flow
 
@@ -58,7 +58,7 @@ the first failure:
 
 | Step | Script | Summary |
 | ---- | ------ | ------- |
-| 1. Backup | [`backup-medik8s-crs.sh`](scripts/poc/backup-medik8s-crs.sh) | Backs up every medik8s CR to an in-cluster PVC (sanitized to restore-ready form), records original `ownerReferences`, and records which operators are installed. |
+| 1. Backup | [`backup-medik8s-crs.sh`](scripts/poc/backup-medik8s-crs.sh) | Runs [medik8s must-gather](https://github.com/medik8s/must-gather) to pull a diagnostic bundle, then derives the in-cluster backup from it: every medik8s CR, sanitized to restore-ready form, written to a PVC (with original `ownerReferences` recorded), plus which operators are installed. |
 | 2. Delete | [`delete-medik8s-operators.sh`](scripts/poc/delete-medik8s-operators.sh) | Deletes the operators safely — CRs → operands → OLM `Subscription`/`CSV` — waiting between each. |
 | 3. Install | [`install-wao.sh`](scripts/poc/install-wao.sh) | Builds/pushes the WAO bundle, and catalog, installs WAO, enables the components that had backed-up CRs. |
 | Rollback | [`rollback-to-medik8s.sh`](scripts/poc/rollback-to-medik8s.sh) | Removes WAO and reinstalls the original operators (with their CRs) from the backup. |
@@ -70,6 +70,9 @@ in progress**.
 ```sh
 # Where the backup PVC/pod live (defaults to openshift-workload-availability)
 WAO_BACKUP_NAMESPACE=<backup-ns>
+
+# Local directory for the must-gather bundle (defaults to ./must-gather-<timestamp>)
+WAO_MUST_GATHER_DIR=<dir>
 
 # Container tool for the WAO build (auto-detected otherwise)
 CONTAINER_TOOL=podman

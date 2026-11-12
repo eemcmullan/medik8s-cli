@@ -163,11 +163,7 @@ norm_arch() {
 }
 
 # Build the catalog (FBC) image. WAO's `catalog-build` generates a Dockerfile that
-# RUNs `opm serve --cache-only` at build time to pre-populate the cache. When the
-# target platform differs from the host (e.g. linux/amd64 on an Apple-Silicon
-# Mac), that RUN executes an emulated amd64 `opm` under qemu, which SIGSEGVs. In
-# that case we build a cache-less FBC image instead (no build-time RUN); `opm
-# serve` builds the cache at runtime on the cluster (native arch).
+# RUNs `opm serve --cache-only` at build time to pre-populate the cache.
 build_catalog() {
   local host target
   host="$(norm_arch "$(uname -m)")"
@@ -211,6 +207,25 @@ generate_manifests() {
   log "wrote ${OUT_DIR}/catalogsource.yaml and ${OUT_DIR}/subscription.yaml"
 }
 
+strip_operatorgroup() {
+  awk '
+    BEGIN { first=1 }
+    function flush() {
+      if (buf ~ /[^[:space:]]/) {
+        if (buf !~ /(^|\n)kind:[ \t]*OperatorGroup[ \t]*\n/) {
+          if (!first) printf "---\n"
+          printf "%s", buf
+          first=0
+        }
+      }
+      buf=""
+    }
+    /^---[ \t]*$/ { flush(); next }
+    { buf = buf $0 "\n" }
+    END { flush() }
+  ' "$1"
+}
+
 # ---------------------------------------------------------------------------
 # Install WAO: CatalogSource -> Subscription -> wait for the CSV to succeed.
 # ---------------------------------------------------------------------------
@@ -222,8 +237,17 @@ install_wao() {
     catalogsource/wao-poc-catalog -n openshift-marketplace --timeout=180s \
     || warn "  CatalogSource not READY yet; the Subscription may take longer to resolve"
 
-  log "INSTALL 2/3: applying Namespace + OperatorGroup + Subscription"
-  kubectl apply -f "${OUT_DIR}/subscription.yaml"
+  # A namespace may only have ONE OperatorGroup; a second one makes OLM refuse to
+  # resolve any Subscription there.
+  local og_count
+  og_count="$(kubectl get operatorgroup -n "$WAO_INSTALL_NS" --no-headers 2>/dev/null | grep -c . || true)"
+  if [ "${og_count:-0}" -ge 1 ]; then
+    log "INSTALL 2/3: applying Namespace + Subscription (namespace already has ${og_count} OperatorGroup(s); reusing it)"
+    strip_operatorgroup "${OUT_DIR}/subscription.yaml" | kubectl apply -f -
+  else
+    log "INSTALL 2/3: applying Namespace + OperatorGroup + Subscription"
+    kubectl apply -f "${OUT_DIR}/subscription.yaml"
+  fi
 
   log "INSTALL 3/3: waiting for the WAO ClusterServiceVersion to succeed (up to ${INSTALL_TIMEOUT}s)"
   local deadline csv phase
@@ -414,8 +438,7 @@ cleanup_build_artifacts() {
   for d in "$WAO_SRC" "$OUT_DIR"; do
     [ -e "$d" ] || continue
     chmod -R u+w "$d" 2>/dev/null || true
-    if rm -rf "$d" 2>/dev/null; then
-    else
+    if ! rm -rf "$d" 2>/dev/null; then
       warn "  could not fully remove ${d}; delete it manually if needed"
     fi
   done
